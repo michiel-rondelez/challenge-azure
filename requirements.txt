@@ -1,5 +1,4 @@
 azure-functions
 pyodbc
 requests
-opencensus-ext-azure
-opencensus-ext-logging
+debugpy

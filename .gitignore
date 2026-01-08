@@ -123,7 +123,7 @@ dmypy.json
 .pyre/
 
 # IDE
-.vscode/
+
 .idea/
 *.swp
 *.swo
@@ -144,6 +144,17 @@ env/
 .python_packages/
 bin/
 obj/
-```
+
+# Azurite (local Azure Storage emulator)
+__blobstorage__/
+__queuestorage__/
+__azurite_db_blob__.json
+__azurite_db_blob_extent__.json
+__azurite_db_queue__.json
+__azurite_db_queue_extent__.json
+__azurite_db_table__.json
+__azurite_db_table_extent__.json
+AzuriteConfig
+azuriteconfig.json
 
 
