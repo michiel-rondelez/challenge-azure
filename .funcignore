@@ -13,8 +13,15 @@ local.settings.json
 README.md
 requirements-dev.txt
 .DS_Store
-function_app.py
 schema_migration.sql
+scripts/
 docs/
 .claude/
 __azurite_db_*.json
+venv/
+.env
+*.zip
+dist/
+build/
+node_modules/
+*.log
