@@ -1,10 +1,12 @@
 import azure.functions as func
 import logging
-import requests
-import pyodbc
-from datetime import datetime
 import os
 import time
+
+# Import shared modules
+from shared.db import get_db_connection, StationRepository, DepartureRepository
+from shared.irail_client import IRailClient
+from shared.models import Departure
 
 # Early debugpy setup (before any other code) — only in DEBUG mode
 if os.environ.get("DEBUG") == "1":
@@ -18,51 +20,25 @@ if os.environ.get("DEBUG") == "1":
 app = func.FunctionApp()
 
 # --- Configuration ---
-SQL_CONN = os.environ.get("SQL_CONNECTION_STRING")
-IRAIL_API = "https://api.irail.be/"
-USER_AGENT = "AzureTrainData/1.0 (becode.org; michiel.rondelez.pro@gmail.com)"
-
-# --- Database Helpers ---
-def get_db_connection():
-    return pyodbc.connect(SQL_CONN)
-
-def get_or_create_station(cursor, station_name):
-    cursor.execute("SELECT id FROM Stations WHERE name = ?", (station_name,))
-    row = cursor.fetchone()
-    if row: return row[0]
-
-    cursor.execute("INSERT INTO Stations (name, standard_name, created_at) VALUES (?, ?, ?)",
-                   (station_name, station_name, datetime.now()))
-    cursor.execute("SELECT @@IDENTITY")
-    return cursor.fetchone()[0]
+irail_client = IRailClient()
 
 # --- Main Logic ---
 def fetch_and_store_trains(station="Brussels-Central"):
     try:
-        res = requests.get(IRAIL_API + "liveboard/", params={"station": station, "format": "json", "fast": "true"},
-                           headers={"User-Agent": USER_AGENT}, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-
-        departures = data.get("departures", {}).get("departure", [])
-        if not departures: return 0
+        # Fetch liveboard data
+        departures_data = irail_client.fetch_liveboard(station)
+        if not departures_data:
+            return 0
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        station_name = data.get("stationinfo", {}).get("standardname", station)
-        station_id = get_or_create_station(cursor, station_name)
+        # Get or create station
+        station_id = StationRepository.get_or_create_simple(cursor, station)
 
-        inserted_count = 0
-        for dep in departures:
-            delay = int(dep.get("delay", 0))
-            cursor.execute("""
-                INSERT INTO Departures (station_id, train_id, vehicle, platform, scheduled_time, delay, direction, fetched_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                station_id, dep.get("id"), dep.get("vehicle"), dep.get("platform"),
-                datetime.fromtimestamp(int(dep.get("time"))), delay, dep.get("station"), datetime.now()
-            )
-            inserted_count += 1
+        # Convert to Departure models and insert
+        departures = [Departure.from_api(dep, station_id) for dep in departures_data]
+        inserted_count = DepartureRepository.insert_batch(cursor, departures)
 
         conn.commit()
         conn.close()
@@ -74,15 +50,138 @@ def fetch_and_store_trains(station="Brussels-Central"):
         logging.error(f"Error for {station}: {str(e)}")
         return 0
 
+# --- Stations Fetching Logic ---
+def fetch_and_store_all_stations():
+    """Fetch all stations from iRail API and store them in the database"""
+    try:
+        # Fetch all stations using the client
+        stations = irail_client.fetch_all_stations()
+        if not stations:
+            logging.warning("No stations returned from API")
+            return 0
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        inserted_count = 0
+        updated_count = 0
+
+        for station in stations:
+            # Check if station exists
+            cursor.execute("SELECT id FROM Stations WHERE name = ?", (station.name,))
+            existing = cursor.fetchone()
+
+            if existing:
+                updated_count += 1
+            else:
+                inserted_count += 1
+
+            StationRepository.upsert(cursor, station)
+
+        conn.commit()
+        conn.close()
+
+        logging.info(f"Stations sync: {inserted_count} new, {updated_count} updated")
+        return inserted_count + updated_count
+
+    except Exception as e:
+        logging.error(f"Error fetching stations: {str(e)}")
+        return 0
+
+# --- Liveboard Fetching Logic ---
+def fetch_and_store_all_liveboards():
+    """Fetch liveboard data for all stations in the database"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Get all stations from database
+        stations = StationRepository.get_all(cursor)
+
+        if not stations:
+            logging.warning("No stations found in database")
+            conn.close()
+            return 0
+
+        total_departures = 0
+
+        for station in stations:
+            # Use standard_name for API call, fallback to name
+            api_station_name = station.standard_name or station.name
+
+            try:
+                # Fetch liveboard for this station
+                departures_data = irail_client.fetch_liveboard(api_station_name)
+
+                if departures_data:
+                    departures = [Departure.from_api(dep, station.id) for dep in departures_data]
+                    count = DepartureRepository.insert_batch(cursor, departures)
+                    total_departures += count
+
+                # Respect API rate limits
+                time.sleep(0.5)
+
+            except Exception as e:
+                logging.error(f"Error fetching liveboard for {station.name}: {str(e)}")
+                continue
+
+        conn.commit()
+        conn.close()
+
+        logging.info(f"Successfully inserted {total_departures} departures from {len(stations)} stations")
+        return total_departures
+
+    except Exception as e:
+        logging.error(f"Error in fetch_and_store_all_liveboards: {str(e)}")
+        return 0
+
 # --- Triggers ---
 @app.route(route="fetch_trains", auth_level=func.AuthLevel.FUNCTION)
 def fetch_trains_http(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info(f"HTTP trigger: {req.method} {req.url}")
+    logging.info(f"Query params: {dict(req.params)}")
+
     station = req.params.get('station', 'Brussels-Central')
     count = fetch_and_store_trains(station)
     return func.HttpResponse(f"Inserted {count} records for {station}", status_code=200 if count > 0 else 500)
 
 @app.schedule(schedule="0 0 * * * *", arg_name="mytimer")
 def fetch_trains_scheduled(mytimer: func.TimerRequest) -> None:
+    logging.info(f"Timer trigger fired. Past due: {mytimer.past_due}")
+
     for station in ["Brussels-Central", "Antwerp-Central", "Ghent-Sint-Pieters"]:
         fetch_and_store_trains(station)
         time.sleep(1) # Respect API limits
+
+# --- New Stations Triggers ---
+@app.route(route="fetch_stations", auth_level=func.AuthLevel.FUNCTION)
+def fetch_stations_http(req: func.HttpRequest) -> func.HttpResponse:
+    """HTTP trigger to fetch and store all stations"""
+    logging.info(f"HTTP trigger: {req.method} {req.url}")
+    logging.info(f"Query params: {dict(req.params)}")
+
+    count = fetch_and_store_all_stations()
+    return func.HttpResponse(
+        f"Successfully processed {count} stations",
+        status_code=200 if count > 0 else 500
+    )
+
+# --- New Liveboard Triggers ---
+@app.route(route="fetch_all_liveboards", auth_level=func.AuthLevel.FUNCTION)
+def fetch_all_liveboards_http(req: func.HttpRequest) -> func.HttpResponse:
+    """HTTP trigger to fetch liveboard data for all stations"""
+    logging.info(f"HTTP trigger: {req.method} {req.url}")
+    logging.info(f"Query params: {dict(req.params)}")
+
+    count = fetch_and_store_all_liveboards()
+    return func.HttpResponse(
+        f"Successfully inserted {count} departure records",
+        status_code=200 if count > 0 else 500
+    )
+
+@app.schedule(schedule="0 */15 * * * *", arg_name="mytimer")
+def fetch_all_liveboards_scheduled(mytimer: func.TimerRequest) -> None:
+    """Schedule trigger to fetch all liveboards every 15 minutes"""
+    logging.info(f"Timer trigger fired. Past due: {mytimer.past_due}")
+
+    fetch_and_store_all_liveboards()

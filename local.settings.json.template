@@ -3,6 +3,7 @@
   "Values": {
     "FUNCTIONS_WORKER_RUNTIME": "python",
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "SQL_CONNECTION_STRING": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:YOUR_SERVER.database.windows.net,1433;Database=YOUR_DATABASE;Uid=YOUR_USERNAME;Pwd=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;"
+    "SQL_CONNECTION_STRING": "Driver={ODBC Driver 18 for SQL Server};Server=tcp:YOUR_SERVER.database.windows.net,1433;Database=YOUR_DATABASE;Uid=YOUR_USERNAME;Pwd=YOUR_PASSWORD;Encrypt=yes;TrustServerCertificate=no;Connection Timeout=30;",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "InstrumentationKey=YOUR_KEY;IngestionEndpoint=YOUR_ENDPOINT;LiveEndpoint=YOUR_LIVE_ENDPOINT;ApplicationId=YOUR_APP_ID"
   }
 }
