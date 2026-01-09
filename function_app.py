@@ -1,7 +1,7 @@
 import azure.functions as func
 import logging
 import os
-import asyncio
+import time
 
 # Import shared modules
 from shared.db import get_db_connection, StationRepository, DepartureRepository
@@ -136,8 +136,8 @@ def fetch_and_store_all_stations():
         return 0
 
 # --- Liveboard Fetching Logic ---
-async def fetch_and_store_all_liveboards_async():
-    """Fetch liveboard data for all stations concurrently using async"""
+def fetch_and_store_all_liveboards():
+    """Fetch liveboard data for all stations in the database with rate limiting"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -150,40 +150,37 @@ async def fetch_and_store_all_liveboards_async():
             conn.close()
             return 0
 
-        # Prepare station list for async fetching
-        station_list = [(s.id, s.standard_name or s.name) for s in stations]
-
-        logging.info(f"Fetching liveboards for {len(station_list)} stations concurrently...")
-
-        # Fetch all liveboards concurrently (max 5 concurrent requests to respect API limits)
-        results = await irail_client.fetch_multiple_liveboards_async(station_list, max_concurrent=5)
-
         total_departures = 0
 
-        # Process results and insert into database
-        for station_id, departures_data in results.items():
-            if departures_data:
-                try:
-                    departures = [Departure.from_api(dep, station_id) for dep in departures_data]
+        for station in stations:
+            # Use standard_name for API call, fallback to name
+            api_station_name = station.standard_name or station.name
+
+            try:
+                # Fetch liveboard for this station
+                departures_data = irail_client.fetch_liveboard(api_station_name)
+
+                if departures_data:
+                    departures = [Departure.from_api(dep, station.id) for dep in departures_data]
                     count = DepartureRepository.insert_batch(cursor, departures)
                     total_departures += count
-                except Exception as e:
-                    logging.error(f"Error processing departures for station {station_id}: {str(e)}")
-                    continue
+
+                # Respect API rate limits with 3 second delay
+                time.sleep(3.0)
+
+            except Exception as e:
+                logging.error(f"Error fetching liveboard for {station.name}: {str(e)}")
+                continue
 
         conn.commit()
         conn.close()
 
-        logging.info(f"Successfully inserted {total_departures} departures from {len(results)} stations")
+        logging.info(f"Successfully inserted {total_departures} departures from {len(stations)} stations")
         return total_departures
 
     except Exception as e:
-        logging.error(f"Error in fetch_and_store_all_liveboards_async: {str(e)}")
+        logging.error(f"Error in fetch_and_store_all_liveboards: {str(e)}")
         return 0
-
-def fetch_and_store_all_liveboards():
-    """Synchronous wrapper for async liveboard fetching"""
-    return asyncio.run(fetch_and_store_all_liveboards_async())
 
 # --- Triggers ---
 @app.route(route="fetch_trains", auth_level=func.AuthLevel.FUNCTION)
@@ -205,7 +202,7 @@ def ingest_departures_http(req: func.HttpRequest) -> func.HttpResponse:
     count = fetch_and_store_trains(station)
     return func.HttpResponse(f"Inserted {count} departure records for {station}", status_code=200 if count > 0 else 500)
 
-# --- New Stations Triggers ---
+# --- Stations Triggers ---
 @app.route(route="fetch_stations", auth_level=func.AuthLevel.FUNCTION)
 def fetch_stations_http(req: func.HttpRequest) -> func.HttpResponse:
     """HTTP trigger to fetch and store all stations"""
@@ -218,7 +215,7 @@ def fetch_stations_http(req: func.HttpRequest) -> func.HttpResponse:
         status_code=200 if count > 0 else 500
     )
 
-# --- New Liveboard Triggers ---
+# --- Liveboard Triggers ---
 @app.route(route="fetch_all_liveboards", auth_level=func.AuthLevel.FUNCTION)
 def fetch_all_liveboards_http(req: func.HttpRequest) -> func.HttpResponse:
     """HTTP trigger to fetch liveboard data for all stations"""
@@ -238,7 +235,7 @@ def fetch_all_liveboards_scheduled(mytimer: func.TimerRequest) -> None:
 
     fetch_and_store_all_liveboards()
 
-# --- New scheduled wrapper for stations ingestion ---
+# --- Scheduled wrapper for stations ingestion ---
 @app.schedule(schedule="0 0 * * * *", arg_name="mytimer")
 def ingest_stations_scheduled(mytimer: func.TimerRequest) -> None:
     """Scheduled trigger to ingest all stations (runs daily at top of hour)"""

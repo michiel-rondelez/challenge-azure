@@ -2,4 +2,3 @@ azure-functions
 debugpy
 requests
 pyodbc
-aiohttp
