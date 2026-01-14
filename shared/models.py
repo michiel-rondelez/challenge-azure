@@ -50,7 +50,11 @@ class Departure:
     platform: str = ""
     scheduled_time: Optional[datetime] = None
     delay: int = 0
+    canceled: bool = False
+    has_left: bool = False
+    is_normal_platform: bool = True
     direction: str = ""
+    occupancy: Optional[str] = None
     fetched_at: Optional[datetime] = None
 
     @classmethod
@@ -64,6 +68,20 @@ class Departure:
             except (ValueError, TypeError):
                 pass
 
+        # Extract canceled status (0/1 in API)
+        canceled = bool(int(data.get("canceled", 0)))
+
+        # Extract has_left status (0/1 in API)
+        has_left = bool(int(data.get("left", 0)))
+
+        # Extract platform info (normal=1 means normal platform)
+        platform_info = data.get("platforminfo", {})
+        is_normal_platform = bool(int(platform_info.get("normal", 1)))
+
+        # Extract occupancy name (e.g., "unknown", "low", "medium", "high")
+        occupancy_data = data.get("occupancy", {})
+        occupancy = occupancy_data.get("name") if isinstance(occupancy_data, dict) else None
+
         return cls(
             station_id=station_id,
             train_id=data.get("id", ""),
@@ -71,7 +89,11 @@ class Departure:
             platform=data.get("platform", ""),
             scheduled_time=scheduled_time,
             delay=int(data.get("delay", 0)),
+            canceled=canceled,
+            has_left=has_left,
+            is_normal_platform=is_normal_platform,
             direction=data.get("station", ""),
+            occupancy=occupancy,
             fetched_at=datetime.now()
         )
 
@@ -86,6 +108,10 @@ class Departure:
             platform=row[4],
             scheduled_time=row[5],
             delay=row[6],
-            direction=row[7],
-            fetched_at=row[8]
+            canceled=row[7] if len(row) > 7 else False,
+            has_left=row[8] if len(row) > 8 else False,
+            is_normal_platform=row[9] if len(row) > 9 else True,
+            direction=row[10] if len(row) > 10 else "",
+            occupancy=row[11] if len(row) > 11 else None,
+            fetched_at=row[12] if len(row) > 12 else None
         )

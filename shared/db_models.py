@@ -1,5 +1,5 @@
 """SQLAlchemy ORM models for database tables"""
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -37,7 +37,11 @@ class DepartureModel(Base):
     platform = Column(String(10))
     scheduled_time = Column(DateTime, nullable=False)
     delay = Column(Integer, default=0)
+    canceled = Column(Boolean, default=False)
+    has_left = Column(Boolean, default=False)
+    is_normal_platform = Column(Boolean, default=True)
     direction = Column(String(255))
+    occupancy = Column(String(50))
     fetched_at = Column(DateTime, default=datetime.now)
 
     # Relationship

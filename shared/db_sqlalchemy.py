@@ -316,7 +316,11 @@ class DepartureRepositorySQLAlchemy:
             platform=departure.platform,
             scheduled_time=departure.scheduled_time,
             delay=departure.delay,
+            canceled=departure.canceled,
+            has_left=departure.has_left,
+            is_normal_platform=departure.is_normal_platform,
             direction=departure.direction,
+            occupancy=departure.occupancy,
             fetched_at=departure.fetched_at
         )
         session.add(new_departure)
@@ -337,7 +341,11 @@ class DepartureRepositorySQLAlchemy:
             existing.vehicle = departure.vehicle
             existing.platform = departure.platform
             existing.delay = departure.delay
+            existing.canceled = departure.canceled
+            existing.has_left = departure.has_left
+            existing.is_normal_platform = departure.is_normal_platform
             existing.direction = departure.direction
+            existing.occupancy = departure.occupancy
             existing.fetched_at = departure.fetched_at
         else:
             # Insert new departure
@@ -363,7 +371,11 @@ class DepartureRepositorySQLAlchemy:
                 existing.vehicle = departure.vehicle
                 existing.platform = departure.platform
                 existing.delay = departure.delay
+                existing.canceled = departure.canceled
+                existing.has_left = departure.has_left
+                existing.is_normal_platform = departure.is_normal_platform
                 existing.direction = departure.direction
+                existing.occupancy = departure.occupancy
                 existing.fetched_at = departure.fetched_at
                 updated += 1
             else:
@@ -392,7 +404,11 @@ class DepartureRepositorySQLAlchemy:
                 platform=d.platform,
                 scheduled_time=d.scheduled_time,
                 delay=d.delay,
+                canceled=d.canceled,
+                has_left=d.has_left,
+                is_normal_platform=d.is_normal_platform,
                 direction=d.direction,
+                occupancy=d.occupancy,
                 fetched_at=d.fetched_at
             )
             for d in departures
@@ -414,7 +430,11 @@ class DepartureRepositorySQLAlchemy:
                 platform=d.platform,
                 scheduled_time=d.scheduled_time,
                 delay=d.delay,
+                canceled=d.canceled,
+                has_left=d.has_left,
+                is_normal_platform=d.is_normal_platform,
                 direction=d.direction,
+                occupancy=d.occupancy,
                 fetched_at=d.fetched_at
             )
             for d in departures
